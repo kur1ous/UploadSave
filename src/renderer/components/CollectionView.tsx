@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CollectionDetail, JobRecord } from "../../shared/types";
+import type { CollectionDetail, JobRecord, TagRecord } from "../../shared/types";
 import { FileTreeTable, toggleSort } from "./FileTreeTable";
 import { ImportDropzone } from "./ImportDropzone";
 import { ExportModal } from "./ExportModal";
@@ -9,10 +9,15 @@ import type { MediaFilter, SortState } from "../utils/collections";
 interface CollectionViewProps {
   collection: CollectionDetail | null;
   jobs: JobRecord[];
+  tags: TagRecord[];
   onReload: () => Promise<void>;
   onBack: () => void;
   onCollectionUpdated: () => void;
   onDeleteCollection: (collectionId: string, collectionName: string) => void;
+  onCreateTag: (name: string) => Promise<void>;
+  onRenameTag: (id: string, name: string) => Promise<void>;
+  onDeleteTag: (id: string) => Promise<void>;
+  onSetItemTags: (itemId: string, tagIds: string[]) => Promise<void>;
 }
 
 function isTextInputFocused(): boolean {
@@ -25,13 +30,26 @@ function isTextInputFocused(): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || active.isContentEditable;
 }
 
-export function CollectionView({ collection, jobs, onReload, onBack, onCollectionUpdated, onDeleteCollection }: CollectionViewProps): JSX.Element {
+export function CollectionView({
+  collection,
+  jobs,
+  tags,
+  onReload,
+  onBack,
+  onCollectionUpdated,
+  onDeleteCollection,
+  onCreateTag,
+  onRenameTag,
+  onDeleteTag,
+  onSetItemTags
+}: CollectionViewProps): JSX.Element {
   const [filter, setFilter] = useState("");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [sort, setSort] = useState<SortState>({ field: "name", direction: "asc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+  const [newTagName, setNewTagName] = useState("");
 
   const collectionJobs = useMemo(() => {
     if (!collection) {
@@ -123,6 +141,53 @@ export function CollectionView({ collection, jobs, onReload, onBack, onCollectio
 
       {clipboardMessage ? <div className="status-card">{clipboardMessage}</div> : null}
 
+      <section className="tag-editor">
+        <h3>Tags</h3>
+        <div className="row-inline">
+          <input
+            className="text-input"
+            value={newTagName}
+            placeholder="Create a tag"
+            onChange={(event) => setNewTagName(event.target.value)}
+          />
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              if (!newTagName.trim()) {
+                return;
+              }
+              void onCreateTag(newTagName.trim()).then(() => setNewTagName(""));
+            }}
+          >
+            Add tag
+          </button>
+        </div>
+        <div className="tag-chip-list">
+          {tags.map((tag) => (
+            <div key={tag.id} className="tag-chip">
+              <span>{tag.name}</span>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  const next = window.prompt("Rename tag", tag.name);
+                  if (next && next.trim() && next.trim() !== tag.name) {
+                    void onRenameTag(tag.id, next.trim());
+                  }
+                }}
+              >
+                Rename
+              </button>
+              <button className="danger-button" type="button" onClick={() => void onDeleteTag(tag.id)}>
+                Delete
+              </button>
+            </div>
+          ))}
+          {tags.length === 0 ? <span className="media-extension">No tags created yet.</span> : null}
+        </div>
+      </section>
+
       <section className="toolbar">
         <input
           className="text-input"
@@ -163,6 +228,7 @@ export function CollectionView({ collection, jobs, onReload, onBack, onCollectio
         mediaFilter={mediaFilter}
         sort={sort}
         selectedIds={selectedIds}
+        tags={tags}
         onToggleSort={(field) => setSort((current) => toggleSort(current, field))}
         onSelectItem={(itemId) => {
           setSelectedIds((current) => {
@@ -174,6 +240,9 @@ export function CollectionView({ collection, jobs, onReload, onBack, onCollectio
             }
             return copy;
           });
+        }}
+        onSetItemTags={(itemId, tagIds) => {
+          void onSetItemTags(itemId, tagIds).then(() => onCollectionUpdated());
         }}
       />
 

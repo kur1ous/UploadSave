@@ -4,9 +4,23 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { ipcChannels } from "../shared/ipc";
-import type { CollectionDetail, ExportInput, ImportInput, JobRecord, ThemeMode } from "../shared/types";
+import type {
+  CollectionDetail,
+  CollectionItem,
+  CreateSmartCollectionInput,
+  ExportInput,
+  ImportInput,
+  JobRecord,
+  SmartCollectionDetail,
+  SmartCollectionSummary,
+  SmartExportPreset,
+  SmartPresetInput,
+  ThemeMode,
+  UpdateSmartCollectionInput
+} from "../shared/types";
 import { UploadSaveDb } from "./services/db";
 import { ensureAppPaths } from "./services/paths";
+import { evaluateSmartRule } from "./services/ruleEngine";
 import { StorageService } from "./services/storageService";
 
 let mainWindow: BrowserWindow | null = null;
@@ -75,9 +89,57 @@ function newJob(type: JobRecord["type"], collectionId: string, payloadJson: stri
 function ensureNonEmptyName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
-    throw new Error("Collection name is required");
+    throw new Error("Name is required");
   }
   return trimmed;
+}
+
+function ensureSmartExists(smartCollectionId: string): void {
+  const row = db.getSmartCollectionRow(smartCollectionId);
+  if (!row) {
+    throw new Error("Smart collection not found");
+  }
+}
+
+function resolveSmartItems(smartCollectionId: string): CollectionItem[] {
+  const row = db.getSmartCollectionRow(smartCollectionId);
+  if (!row) {
+    throw new Error("Smart collection not found");
+  }
+
+  const allItems = db.listAllItems();
+  return evaluateSmartRule(allItems, row.rule);
+}
+
+function hydrateSmartSummary(summary: SmartCollectionSummary): SmartCollectionSummary {
+  const allItems = db.listAllItems();
+  const matched = evaluateSmartRule(allItems, summary.rule);
+  return {
+    ...summary,
+    matchedCount: matched.length
+  };
+}
+
+function getSmartDetail(smartCollectionId: string): SmartCollectionDetail {
+  const row = db.getSmartCollectionRow(smartCollectionId);
+  if (!row) {
+    throw new Error("Smart collection not found");
+  }
+
+  const matched = evaluateSmartRule(db.listAllItems(), row.rule);
+  const presets = db.listSmartExportPresets(smartCollectionId);
+
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    rule: row.rule,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    matchedCount: matched.length,
+    previewItems: matched.slice(0, 250),
+    presets
+  };
 }
 
 async function loadThemePreference(): Promise<ThemeMode> {
@@ -141,6 +203,33 @@ app.whenReady().then(async () => {
     return job;
   };
 
+  const queueExportJob = (
+    exportOwnerId: string,
+    items: CollectionItem[],
+    mode: "folder" | "zip",
+    destinationPath: string,
+    overwrite: "skip" | "replace",
+    payloadJson: string | null
+  ): JobRecord => {
+    const job = newJob("export", exportOwnerId, payloadJson);
+    db.createJob(job);
+    emitJobUpdated(job, mainWindow);
+
+    void storageService.exportCollection(exportOwnerId, items, mode, destinationPath, overwrite, job, mainWindow).catch((error: unknown) => {
+      const now = new Date().toISOString();
+      const failed: JobRecord = {
+        ...job,
+        status: "error",
+        updatedAt: now,
+        message: error instanceof Error ? error.message : "Export failed"
+      };
+      db.updateJob(failed.id, failed.status, failed.progressCurrent, failed.progressTotal, failed.message, failed.payloadJson, failed.updatedAt);
+      emitJobUpdated(failed, mainWindow);
+    });
+
+    return job;
+  };
+
   ipcMain.handle(ipcChannels.createCollection, (_event, input: { name: string; description?: string }) => {
     const now = new Date().toISOString();
     const id = randomUUID();
@@ -153,22 +242,18 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(ipcChannels.listCollections, () => db.listCollections());
-
   ipcMain.handle(ipcChannels.getCollection, (_event, collectionId: string) => db.getCollection(collectionId));
 
-  ipcMain.handle(
-    ipcChannels.deleteCollection,
-    async (_event, payload: { collectionId: string; deleteStoredFiles: boolean }) => {
-      const items = db.deleteCollection(payload.collectionId);
-      if (payload.deleteStoredFiles) {
-        for (const item of items) {
-          if (fs.existsSync(item.storagePath)) {
-            await fsp.rm(item.storagePath, { force: true });
-          }
+  ipcMain.handle(ipcChannels.deleteCollection, async (_event, payload: { collectionId: string; deleteStoredFiles: boolean }) => {
+    const items = db.deleteCollection(payload.collectionId);
+    if (payload.deleteStoredFiles) {
+      for (const item of items) {
+        if (fs.existsSync(item.storagePath)) {
+          await fsp.rm(item.storagePath, { force: true });
         }
       }
     }
-  );
+  });
 
   ipcMain.handle(
     ipcChannels.removeItems,
@@ -182,6 +267,93 @@ app.whenReady().then(async () => {
       return db.getCollection(payload.collectionId);
     }
   );
+
+  ipcMain.handle(ipcChannels.listTags, () => db.listTags());
+
+  ipcMain.handle(ipcChannels.createTag, (_event, payload: { name: string }) => {
+    const name = ensureNonEmptyName(payload.name);
+    return db.createTag(randomUUID(), name, new Date().toISOString());
+  });
+
+  ipcMain.handle(ipcChannels.renameTag, (_event, payload: { id: string; name: string }) => {
+    const name = ensureNonEmptyName(payload.name);
+    return db.renameTag(payload.id, name);
+  });
+
+  ipcMain.handle(ipcChannels.deleteTag, (_event, payload: { id: string }) => {
+    db.deleteTag(payload.id);
+  });
+
+  ipcMain.handle(ipcChannels.setItemTags, (_event, payload: { itemId: string; tagIds: string[] }) => {
+    return db.setItemTags(payload.itemId, payload.tagIds);
+  });
+
+  ipcMain.handle(ipcChannels.createSmartCollection, (_event, input: CreateSmartCollectionInput) => {
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    db.createSmartCollection(id, ensureNonEmptyName(input.name), input.description, input.rule, now);
+    return hydrateSmartSummary(db.listSmartCollections().find((item) => item.id === id) as SmartCollectionSummary);
+  });
+
+  ipcMain.handle(ipcChannels.updateSmartCollection, (_event, input: UpdateSmartCollectionInput) => {
+    const now = new Date().toISOString();
+    db.updateSmartCollection(input.id, ensureNonEmptyName(input.name), input.description, input.rule, now);
+    return getSmartDetail(input.id);
+  });
+
+  ipcMain.handle(ipcChannels.deleteSmartCollection, (_event, payload: { id: string }) => {
+    db.deleteSmartCollection(payload.id);
+  });
+
+  ipcMain.handle(ipcChannels.listSmartCollections, (): SmartCollectionSummary[] => {
+    return db.listSmartCollections().map(hydrateSmartSummary);
+  });
+
+  ipcMain.handle(ipcChannels.getSmartCollection, (_event, payload: { id: string }): SmartCollectionDetail => {
+    return getSmartDetail(payload.id);
+  });
+
+  ipcMain.handle(ipcChannels.resolveSmartCollectionItems, (_event, payload: { id: string }): CollectionItem[] => {
+    return resolveSmartItems(payload.id);
+  });
+
+  ipcMain.handle(ipcChannels.saveSmartExportPreset, (_event, payload: { smartCollectionId: string; preset: SmartPresetInput }) => {
+    ensureSmartExists(payload.smartCollectionId);
+    const now = new Date().toISOString();
+    const id = payload.preset.id ?? randomUUID();
+    return db.saveSmartExportPreset(
+      payload.smartCollectionId,
+      id,
+      ensureNonEmptyName(payload.preset.name),
+      payload.preset.mode,
+      payload.preset.destinationPath,
+      payload.preset.overwrite,
+      now
+    );
+  });
+
+  ipcMain.handle(ipcChannels.runSmartExportPreset, (_event, payload: { smartCollectionId: string; presetId: string }): JobRecord => {
+    const preset = db.getSmartPreset(payload.presetId);
+    if (!preset) {
+      throw new Error("Preset not found");
+    }
+    if (preset.smartCollectionId !== payload.smartCollectionId) {
+      throw new Error("Preset does not belong to smart collection");
+    }
+
+    const items = resolveSmartItems(payload.smartCollectionId);
+    const job = queueExportJob(
+      payload.smartCollectionId,
+      items,
+      preset.mode,
+      preset.destinationPath,
+      preset.overwrite,
+      JSON.stringify({ source: "smartPreset", presetId: payload.presetId })
+    );
+
+    db.touchSmartPresetLastRun(payload.presetId, new Date().toISOString());
+    return job;
+  });
 
   ipcMain.handle(ipcChannels.listJobs, (): JobRecord[] => db.listJobs());
 
@@ -260,25 +432,14 @@ app.whenReady().then(async () => {
       throw new Error("Collection not found");
     }
 
-    const job = newJob("export", input.collectionId, JSON.stringify({ mode: input.mode, destinationPath: input.destinationPath }));
-    db.createJob(job);
-    emitJobUpdated(job, mainWindow);
-
-    void storageService
-      .exportCollection(input.collectionId, collection.items, input.mode, input.destinationPath, input.overwrite, job, mainWindow)
-      .catch((error: unknown) => {
-        const now = new Date().toISOString();
-        const failed: JobRecord = {
-          ...job,
-          status: "error",
-          updatedAt: now,
-          message: error instanceof Error ? error.message : "Export failed"
-        };
-        db.updateJob(failed.id, failed.status, failed.progressCurrent, failed.progressTotal, failed.message, failed.payloadJson, failed.updatedAt);
-        emitJobUpdated(failed, mainWindow);
-      });
-
-    return job;
+    return queueExportJob(
+      input.collectionId,
+      collection.items,
+      input.mode,
+      input.destinationPath,
+      input.overwrite,
+      JSON.stringify({ source: "collectionExport", collectionId: input.collectionId })
+    );
   });
 
   ipcMain.handle("theme:get", async (): Promise<ThemeMode> => loadThemePreference());

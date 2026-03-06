@@ -57,20 +57,31 @@ export function CreateCollectionCard({ onCreate }: CreateCollectionCardProps): J
       }}
     >
       <h3>Create collection</h3>
+
+      <label className="field-label" htmlFor="collection-name-input">
+        Collection name
+      </label>
       <input
+        id="collection-name-input"
         className="text-input"
-        placeholder="Collection name"
+        placeholder="Enter collection name"
         value={name}
         onChange={(event) => setName(event.target.value)}
       />
+
+      <label className="field-label" htmlFor="collection-description-input">
+        Description (optional)
+      </label>
       <textarea
+        id="collection-description-input"
         className="text-input"
-        placeholder="Description (optional)"
+        placeholder="What's this collection for?"
         value={description}
         onChange={(event) => setDescription(event.target.value)}
       />
+
       <button className="primary-button" disabled={isSubmitting} type="submit">
-        {isSubmitting ? "Creating..." : "Create"}
+        {isSubmitting ? "Creating..." : "Create Collection"}
       </button>
     </form>
   );

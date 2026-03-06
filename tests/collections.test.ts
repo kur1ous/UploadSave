@@ -13,6 +13,7 @@ const items: CollectionItem[] = [
     sizeBytes: 300,
     extension: ".txt",
     mediaType: "document",
+    tagIds: ["tag-docs"],
     createdAt: "2026-01-01T00:00:00.000Z"
   },
   {
@@ -25,6 +26,7 @@ const items: CollectionItem[] = [
     sizeBytes: 100,
     extension: ".mp3",
     mediaType: "audio",
+    tagIds: ["tag-audio"],
     createdAt: "2026-02-01T00:00:00.000Z"
   }
 ];

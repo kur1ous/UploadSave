@@ -9,7 +9,7 @@ export function JobQueuePanel({ jobs }: JobQueuePanelProps): JSX.Element {
 
   return (
     <section className="job-panel">
-      <header>
+      <header className="panel-header">
         <h3>Activity</h3>
         <p>Imports and exports update in real-time.</p>
       </header>

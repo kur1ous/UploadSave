@@ -2,6 +2,31 @@ export type ExportMode = "folder" | "zip";
 export type ThemeMode = "light" | "dark" | "system";
 export type MediaType = "image" | "audio" | "video" | "document" | "archive" | "code" | "other";
 
+export type RuleConditionType =
+  | "mediaType"
+  | "tagIncludes"
+  | "tagExcludes"
+  | "pathContains"
+  | "extensionIs"
+  | "sizeRange"
+  | "importedDateRange";
+
+export interface SmartRuleCondition {
+  id: string;
+  type: RuleConditionType;
+  mediaType?: MediaType;
+  tagId?: string;
+  textValue?: string;
+  minBytes?: number;
+  maxBytes?: number;
+  fromDate?: string;
+  toDate?: string;
+}
+
+export interface SmartRule {
+  conditions: SmartRuleCondition[];
+}
+
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -22,11 +47,45 @@ export interface CollectionItem {
   sizeBytes: number;
   extension: string;
   mediaType: MediaType;
+  tagIds: string[];
   createdAt: string;
 }
 
 export interface CollectionDetail extends CollectionSummary {
   items: CollectionItem[];
+}
+
+export interface TagRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SmartCollectionSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  rule: SmartRule;
+  createdAt: string;
+  updatedAt: string;
+  matchedCount: number;
+}
+
+export interface SmartCollectionDetail extends SmartCollectionSummary {
+  previewItems: CollectionItem[];
+  presets: SmartExportPreset[];
+}
+
+export interface SmartExportPreset {
+  id: string;
+  smartCollectionId: string;
+  name: string;
+  mode: ExportMode;
+  destinationPath: string;
+  overwrite: "skip" | "replace";
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface JobRecord {
@@ -47,8 +106,29 @@ export interface CreateCollectionInput {
   description?: string;
 }
 
+export interface CreateSmartCollectionInput {
+  name: string;
+  description?: string;
+  rule: SmartRule;
+}
+
+export interface UpdateSmartCollectionInput {
+  id: string;
+  name: string;
+  description?: string;
+  rule: SmartRule;
+}
+
 export interface ExportInput {
   collectionId: string;
+  mode: ExportMode;
+  destinationPath: string;
+  overwrite: "skip" | "replace";
+}
+
+export interface SmartPresetInput {
+  id?: string;
+  name: string;
   mode: ExportMode;
   destinationPath: string;
   overwrite: "skip" | "replace";
