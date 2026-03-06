@@ -5,6 +5,7 @@ export const ipcChannels = {
   deleteCollection: "collection:delete",
   removeItems: "collection:removeItems",
   importIntoCollection: "collection:import",
+  importFromClipboard: "collection:importFromClipboard",
   exportCollection: "collection:export",
   listJobs: "job:list",
   pickImportPaths: "dialog:pickImportPaths",

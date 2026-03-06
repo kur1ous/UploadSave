@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CollectionDetail, JobRecord } from "../../shared/types";
 import { FileTreeTable, toggleSort } from "./FileTreeTable";
 import { ImportDropzone } from "./ImportDropzone";
@@ -15,12 +15,23 @@ interface CollectionViewProps {
   onDeleteCollection: (collectionId: string, collectionName: string) => void;
 }
 
+function isTextInputFocused(): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) {
+    return false;
+  }
+
+  const tag = active.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || active.isContentEditable;
+}
+
 export function CollectionView({ collection, jobs, onReload, onBack, onCollectionUpdated, onDeleteCollection }: CollectionViewProps): JSX.Element {
   const [filter, setFilter] = useState("");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [sort, setSort] = useState<SortState>({ field: "name", direction: "asc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
 
   const collectionJobs = useMemo(() => {
     if (!collection) {
@@ -28,6 +39,40 @@ export function CollectionView({ collection, jobs, onReload, onBack, onCollectio
     }
     return jobs.filter((job) => job.collectionId === collection.id);
   }, [jobs, collection]);
+
+  const importFromClipboard = async (): Promise<void> => {
+    if (!collection) {
+      return;
+    }
+
+    try {
+      await window.uploadSave.importFromClipboard(collection.id);
+      setClipboardMessage("Clipboard image queued for import.");
+      onCollectionUpdated();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Clipboard import failed.";
+      setClipboardMessage(message);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!collection) {
+        return;
+      }
+
+      const isPaste = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v";
+      if (!isPaste || isTextInputFocused()) {
+        return;
+      }
+
+      event.preventDefault();
+      void importFromClipboard();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [collection]);
 
   if (!collection) {
     return <div className="status-card">Collection not found.</div>;
@@ -73,7 +118,10 @@ export function CollectionView({ collection, jobs, onReload, onBack, onCollectio
           await window.uploadSave.importIntoCollection({ collectionId: collection.id, sourcePaths });
           onCollectionUpdated();
         }}
+        onPasteClipboard={importFromClipboard}
       />
+
+      {clipboardMessage ? <div className="status-card">{clipboardMessage}</div> : null}
 
       <section className="toolbar">
         <input

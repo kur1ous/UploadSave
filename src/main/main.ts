@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialogOptions, type SaveDialogOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, type OpenDialogOptions, type SaveDialogOptions } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -109,6 +109,38 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  const queueImportJob = (
+    collectionId: string,
+    sourcePaths: string[],
+    payloadJson: string | null,
+    onSettled?: () => Promise<void>
+  ): JobRecord => {
+    const job = newJob("import", collectionId, payloadJson);
+    db.createJob(job);
+    emitJobUpdated(job, mainWindow);
+
+    void storageService
+      .importIntoCollection(collectionId, sourcePaths, job, mainWindow)
+      .catch((error: unknown) => {
+        const now = new Date().toISOString();
+        const failed: JobRecord = {
+          ...job,
+          status: "error",
+          updatedAt: now,
+          message: error instanceof Error ? error.message : "Import failed"
+        };
+        db.updateJob(failed.id, failed.status, failed.progressCurrent, failed.progressTotal, failed.message, failed.payloadJson, failed.updatedAt);
+        emitJobUpdated(failed, mainWindow);
+      })
+      .finally(() => {
+        if (onSettled) {
+          void onSettled();
+        }
+      });
+
+    return job;
+  };
+
   ipcMain.handle(ipcChannels.createCollection, (_event, input: { name: string; description?: string }) => {
     const now = new Date().toISOString();
     const id = randomUUID();
@@ -177,6 +209,30 @@ app.whenReady().then(async () => {
     return result.canceled ? [] : result.filePaths;
   });
 
+  ipcMain.handle(ipcChannels.importFromClipboard, async (_event, payload: { collectionId: string }): Promise<JobRecord> => {
+    const collection = db.getCollection(payload.collectionId);
+    if (!collection) {
+      throw new Error("Collection not found");
+    }
+
+    const image = clipboard.readImage();
+    if (image.isEmpty()) {
+      throw new Error("Clipboard does not contain an image to import.");
+    }
+
+    const tempName = `clipboard-${Date.now()}-${randomUUID()}.png`;
+    const tempPath = path.join(appPaths.tempDir, tempName);
+    await fsp.writeFile(tempPath, image.toPNG());
+
+    const removeTempFile = async (): Promise<void> => {
+      if (fs.existsSync(tempPath)) {
+        await fsp.rm(tempPath, { force: true });
+      }
+    };
+
+    return queueImportJob(payload.collectionId, [tempPath], JSON.stringify({ source: "clipboard-image" }), removeTempFile);
+  });
+
   ipcMain.handle(ipcChannels.pickExportDestination, async (_event, mode: "folder" | "zip") => {
     if (mode === "folder") {
       const result = await showOpenDialog({
@@ -195,23 +251,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(ipcChannels.importIntoCollection, async (_event, input: ImportInput): Promise<JobRecord> => {
-    const job = newJob("import", input.collectionId, JSON.stringify({ sourcePaths: input.sourcePaths }));
-    db.createJob(job);
-    emitJobUpdated(job, mainWindow);
-
-    void storageService.importIntoCollection(input.collectionId, input.sourcePaths, job, mainWindow).catch((error: unknown) => {
-      const now = new Date().toISOString();
-      const failed: JobRecord = {
-        ...job,
-        status: "error",
-        updatedAt: now,
-        message: error instanceof Error ? error.message : "Import failed"
-      };
-      db.updateJob(failed.id, failed.status, failed.progressCurrent, failed.progressTotal, failed.message, failed.payloadJson, failed.updatedAt);
-      emitJobUpdated(failed, mainWindow);
-    });
-
-    return job;
+    return queueImportJob(input.collectionId, input.sourcePaths, JSON.stringify({ sourcePaths: input.sourcePaths }));
   });
 
   ipcMain.handle(ipcChannels.exportCollection, async (_event, input: ExportInput): Promise<JobRecord> => {

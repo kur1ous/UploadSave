@@ -11,6 +11,7 @@ const api: UploadSaveApi = {
     ipcRenderer.invoke(ipcChannels.deleteCollection, { collectionId, deleteStoredFiles }),
   removeItems: (collectionId, itemIds) => ipcRenderer.invoke(ipcChannels.removeItems, { collectionId, itemIds }),
   importIntoCollection: (input) => ipcRenderer.invoke(ipcChannels.importIntoCollection, input),
+  importFromClipboard: (collectionId) => ipcRenderer.invoke(ipcChannels.importFromClipboard, { collectionId }),
   exportCollection: (input) => ipcRenderer.invoke(ipcChannels.exportCollection, input),
   listJobs: () => ipcRenderer.invoke(ipcChannels.listJobs),
   pickImportPaths: () => ipcRenderer.invoke(ipcChannels.pickImportPaths),

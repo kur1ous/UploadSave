@@ -15,6 +15,7 @@ export interface UploadSaveApi {
   deleteCollection: (collectionId: string, deleteStoredFiles: boolean) => Promise<void>;
   removeItems: (collectionId: string, itemIds: string[]) => Promise<CollectionDetail | null>;
   importIntoCollection: (input: ImportInput) => Promise<JobRecord>;
+  importFromClipboard: (collectionId: string) => Promise<JobRecord>;
   exportCollection: (input: ExportInput) => Promise<JobRecord>;
   listJobs: () => Promise<JobRecord[]>;
   pickImportPaths: () => Promise<string[]>;
