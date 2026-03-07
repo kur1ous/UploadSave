@@ -35,6 +35,7 @@ function createWindow(): void {
     minWidth: 1000,
     minHeight: 680,
     backgroundColor: "#0f1115",
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -50,6 +51,8 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
   }
+
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -463,3 +466,6 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+
+

@@ -961,3 +961,14 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+
+.app-main, .sidebar-list {
+  scrollbar-width: none;
+}
+
+.app-main::-webkit-scrollbar, .sidebar-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
